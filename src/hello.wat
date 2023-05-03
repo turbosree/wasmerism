@@ -1,5 +1,5 @@
 (module
-  (func (export "answer") (result i32)
+  (func (export "hello") (result i32)
      i32.const 42
   )
 )

@@ -2,49 +2,46 @@
 //
 // Author: sreejith.naarakathil@gmail.com
 
-use std::error::Error;
-use wasmtime::*;
+use wasmer::{Store, Module, Instance, Value, imports};
+use std::fs;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // An engine stores and configures global compilation settings like
-    // optimization level, enabled wasm features, etc.
-    let engine = Engine::default();
+fn main() -> anyhow::Result<()> {
+    // Load a wat file in different ways
+    let add_one_wat = r#"
+    (module
+      (type $t0 (func (param i32) (result i32)))
+      (func $add_one (export "add_one") (type $t0) (param $p0 i32) (result i32)
+        get_local $p0
+        i32.const 1
+        i32.add))
+    "#;
+    let add_wat = fs::read_to_string("./src/add.wat")?;
+    let hello_wat = fs::read_to_string("./src/hello.wat")?;
 
-    // We start off by creating a `Module` which represents a compiled form
-    // of our input wasm module. In this case it'll be JIT-compiled after
-    // we parse the text format.
-    let module = Module::from_file(&engine, "./src/hello.wat")?;
-    let module2 = Module::from_file(&engine, "./src/add.wat")?;
+    // Setup store with all the modules loaded
+    let mut store = Store::default();
+    let add_one_module = Module::new(&store, &add_one_wat)?;
+    let add_module = Module::new(&store, &add_wat)?;
+    let hello_module = Module::new(&store, &hello_wat)?;
 
-    // A `Store` is what will own instances, functions, globals, etc. All wasm
-    // items are stored within a `Store`, and it's what we'll always be using to
-    // interact with the wasm world. Custom data can be stored in stores but for
-    // now we just use `()`.
-    let mut store = Store::new(&engine, ());
+    // The module doesn't import anything, so we create an empty import object.
+    let import_object = imports! {};
+    let add_one_instance = Instance::new(&mut store, &add_one_module, &import_object)?;
+    let add_instance = Instance::new(&mut store, &add_module, &import_object)?;
+    let hello_instance = Instance::new(&mut store, &hello_module, &import_object)?;
 
-    // With a compiled `Module` we can then instantiate it, creating
-    // an `Instance` which we can actually poke at functions on.
-    let instance = Instance::new(&mut store, &module, &[])?;
-    let instance2 = Instance::new(&mut store, &module2, &[])?;
+    // Call functions loaded from the wat files
+    let add_one = add_one_instance.exports.get_function("add_one")?;
+    let result = add_one.call(&mut store, &[Value::I32(42)])?;
+    println!("Result: {:?}", result);
 
-    // The `Instance` gives us access to various exported functions and items,
-    // which we access here to pull out our `answer` exported function and
-    // run it.
-    let answer = instance.get_func(&mut store, "answer")
-        .expect("`answer` was not an exported function");
-    let add = instance2.get_func(&mut store, "add")
-        .expect("`add` was not an exported function");
-    // There's a few ways we can call the `answer` `Func` value. The easiest
-    // is to statically assert its signature with `typed` (in this case
-    // asserting it takes no arguments and returns one i32) and then call it.
-    let answer = answer.typed::<(), i32>(&store)?;
-    let add = add.typed::<(i32, i32), i32>(&store)?;
+    let add = add_instance.exports.get_function("add")?;
+    let result = add.call(&mut store, &[Value::I32(4), Value::I32(5)])?;
+    println!("Result: {:?}", result);
 
-    // And finally we can call our function! Note that the error propagation
-    // with `?` is done to handle the case where the wasm function traps.
-    let result = answer.call(&mut store, ())?;
-    println!("Answer: {:?}", result);
-    let result = add.call(&mut store, (4, 5))?;
-    println!("Result: {:?}", result);    
+    let hello = hello_instance.exports.get_function("hello")?;
+    let result = hello.call(&mut store, &[])?;
+    println!("Result: {:?}", result);
+
     Ok(())
 }
